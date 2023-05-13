@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using DemoMinimalAPI.Repositories;
 using DemoMinimalAPI.Services;
+using System.Security.Claims;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,7 +33,42 @@ builder.Services.AddAuthentication(x =>
 });
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Demo Minimal API",
+        Description = "Developed by Ivan Longarai for study purposes",
+        License = new OpenApiLicense { Name = "License MIT", Url = new Uri("https://opensource.org/licenses/MIT")}
+    });
+
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "Enter with the JWT like this: Bearer {token}",
+        Name = "Authorization",
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey
+    });
+
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new string[] {}
+        }
+    });
+
+});
 
 builder.Services.AddDbContext<MinimalContextDb>(options =>
 {
@@ -81,52 +118,66 @@ app.MapPost("/login", (User userParam) =>
 .Produces(StatusCodes.Status200OK)
 .Produces(StatusCodes.Status404NotFound)
 .WithName("GetTokenByLogIn")
-.WithTags("User");
+.WithTags("User")
+.AllowAnonymous();
+
+app.MapGet("/authenticated", (ClaimsPrincipal user) =>
+{
+    Results.Ok(new { message = $"Authenticated as {user?.Identity!.Name}" });
+})
+.Produces(StatusCodes.Status200OK)
+.WithName("GetAuthenticationStatus")
+.WithTags("User")
+.RequireAuthorization();
 
 /* Suppiers rotes */
 
 app.MapGet("/supplierList", async (MinimalContextDb ctx) =>
         await ctx.Suppliers.ToListAsync()
     )
+    .RequireAuthorization()
     .WithName("GetSuppierList")
     .WithTags("Supplier");
+
 
 app.MapGet("/supplier/{id}", async (Guid id, MinimalContextDb ctx) =>
         await ctx.Suppliers.FindAsync(id) is Supplier supplier ? Results.Ok(supplier)
             : Results.NotFound()
     )
+    .RequireAuthorization()
     .Produces<Supplier>(StatusCodes.Status200OK)
     .Produces(StatusCodes.Status404NotFound)
     .WithName("GetSuppierById")
     .WithTags("Supplier");
 
 app.MapPost("/supplier", async (MinimalContextDb ctx, Supplier supplier) =>
+{
+    var validationResult = Supplier.GetValidator().Validate(supplier);
+
+    if (validationResult.IsValid)
     {
-        var validationResult = Supplier.GetValidator().Validate(supplier);
+        ctx.Suppliers.Add(supplier);
+        var result = await ctx.SaveChangesAsync();
 
-        if (validationResult.IsValid)
+        /* It is just another way of returning this: 
+            return result > 0 ? Results.Created($"/supplier/{supplier.Id}", supplier) : Results.BadRequest("Something went wrong");
+        */
+
+        return result > 0 ? Results.CreatedAtRoute("GetSuppierById", new {id = supplier.Id}, supplier) : Results.BadRequest("Something went wrong");
+    }
+    else
+    {
+        var errosToReturn = validationResult.Errors.Select(e => e.ErrorMessage);
+
+        var result = new Dictionary<string, string[]>
         {
-            ctx.Suppliers.Add(supplier);
-            var result = await ctx.SaveChangesAsync();
+            { "Supplier", errosToReturn.ToArray() }
+        };
 
-            /* It is just another way of returning this: 
-                return result > 0 ? Results.Created($"/supplier/{supplier.Id}", supplier) : Results.BadRequest("Something went wrong");
-            */
-
-            return result > 0 ? Results.CreatedAtRoute("GetSuppierById", new {id = supplier.Id}, supplier) : Results.BadRequest("Something went wrong");
-        }
-        else
-        {
-            var errosToReturn = validationResult.Errors.Select(e => e.ErrorMessage);
-
-            var result = new Dictionary<string, string[]>
-            {
-                { "Supplier", errosToReturn.ToArray() }
-            };
-
-            return Results.ValidationProblem(result);
-        }
-    })
+        return Results.ValidationProblem(result);
+    }
+})
+.RequireAuthorization()
 .ProducesValidationProblem()
 .Produces<Supplier>(StatusCodes.Status201Created)
 .Produces(StatusCodes.Status400BadRequest)
@@ -166,6 +217,7 @@ app.MapPut("/supplier/{id}", async (Guid id, MinimalContextDb ctx, Supplier supp
             return Results.ValidationProblem(result);
         }
 })
+.RequireAuthorization("Admin")
 .ProducesValidationProblem()
 .Produces<Supplier>(StatusCodes.Status200OK)
 .Produces(StatusCodes.Status404NotFound)
@@ -188,6 +240,7 @@ app.MapDelete("/supplier/{id}", async (Guid id, MinimalContextDb ctx) =>
         return result > 0 ? Results.Ok($"Removed successfully the supplier id: {id}") : Results.BadRequest("Something went wrong");
     }    
 })
+.RequireAuthorization("Admin")
 .ProducesValidationProblem()
 .Produces<Supplier>(StatusCodes.Status200OK)
 .Produces(StatusCodes.Status404NotFound)
