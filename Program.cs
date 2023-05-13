@@ -73,11 +73,15 @@ app.MapPost("/login", (User userParam) =>
 
     return Results.Ok(new
     {
-        user = user,
-        token = token
+        user,
+        token
     });
 
-});
+})
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status404NotFound)
+.WithName("GetTokenByLogIn")
+.WithTags("User");
 
 /* Suppiers rotes */
 
