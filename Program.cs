@@ -37,4 +37,37 @@ app.MapGet("/supplier/{id}", async (Guid id, MinimalContextDb ctx) =>
     .WithName("GetSuppierById")
     .WithTags("Supplier");
 
+app.MapPost("/supplier", async (MinimalContextDb ctx, Supplier supplier) =>
+    {
+        var validationResult = Supplier.GetValidator().Validate(supplier);
+
+        if (validationResult.IsValid)
+        {
+            ctx.Suppliers.Add(supplier);
+            var result = await ctx.SaveChangesAsync();
+
+            /* It is just another way of returning this: 
+                return result > 0 ? Results.Created($"/supplier/{supplier.Id}", supplier) : Results.BadRequest("Something went wrong");
+            */
+
+            return result > 0 ? Results.CreatedAtRoute("GetSuppierById", new {id = supplier.Id}, supplier) : Results.BadRequest("Something went wrong");
+        }
+        else
+        {
+            var errosToReturn = validationResult.Errors.Select(e => e.ErrorMessage);
+
+            var result = new Dictionary<string, string[]>
+            {
+                { "Supplier", errosToReturn.ToArray() }
+            };
+
+            return Results.ValidationProblem(result);
+        }
+    })
+    .ProducesValidationProblem()
+    .Produces<Supplier>(StatusCodes.Status201Created)
+    .Produces(StatusCodes.Status400BadRequest)
+    .WithName("PostSupplier")
+    .WithTags("Supplier");
+
 app.Run();
