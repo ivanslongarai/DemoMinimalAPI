@@ -1,8 +1,34 @@
 using DemoMinimalAPI.Data;
 using DemoMinimalAPI.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Text;
+using DemoMinimalAPI;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using DemoMinimalAPI.Repositories;
+using DemoMinimalAPI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var key = Encoding.ASCII.GetBytes(Settings.Secret);
+
+builder.Services.AddAuthentication(x =>
+    {
+        x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        x.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    }
+).AddJwtBearer(x =>
+{
+    x.RequireHttpsMetadata = false;
+    x.SaveToken = true;
+    x.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(key),
+        ValidateIssuer = false,
+        ValidateAudience = false,
+    };
+});
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -12,7 +38,16 @@ builder.Services.AddDbContext<MinimalContextDb>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
 });
 
+builder.Services.AddAuthorization(opt =>
+{
+    opt.AddPolicy("Admin", policy => policy.RequireRole("manager"));
+    opt.AddPolicy("Employee", policy => policy.RequireRole("employee"));
+});
+
 var app = builder.Build();
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())
 {
@@ -21,6 +56,30 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+/* User rotes */
+
+app.MapPost("/login", (User userParam) =>
+{
+    var user = UserRepository.Get(userParam.UserName!, userParam.Password!);
+
+    if (user == null)
+    {
+        return Results.NotFound(new { message = "Invalid username or password" });
+    }
+
+    var token = TokenService.GenerateToken(user!);
+    user!.Password = String.Empty;
+
+    return Results.Ok(new
+    {
+        user = user,
+        token = token
+    });
+
+});
+
+/* Suppiers rotes */
 
 app.MapGet("/supplierList", async (MinimalContextDb ctx) =>
         await ctx.Suppliers.ToListAsync()
