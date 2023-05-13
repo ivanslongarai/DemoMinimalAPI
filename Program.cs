@@ -1,4 +1,5 @@
 using DemoMinimalAPI.Data;
+using DemoMinimalAPI.Models;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,11 +22,19 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapGet("SupplierList", async (
-        MinimalContextDb ctx) =>
+app.MapGet("/supplierList", async (MinimalContextDb ctx) =>
         await ctx.Suppliers.ToListAsync()
     )
     .WithName("GetSuppierList")
+    .WithTags("Supplier");
+
+app.MapGet("/supplier/{id}", async (Guid id, MinimalContextDb ctx) =>
+        await ctx.Suppliers.FindAsync(id) is Supplier supplier ? Results.Ok(supplier)
+            : Results.NotFound()
+    )
+    .Produces<Supplier>(StatusCodes.Status200OK)
+    .Produces(StatusCodes.Status404NotFound)
+    .WithName("GetSuppierById")
     .WithTags("Supplier");
 
 app.Run();
